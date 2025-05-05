@@ -2,8 +2,9 @@ import logging
 import requests
 import xlsxwriter
 import enum
-from datetime import date
+from datetime import date, datetime
 from requests.auth import HTTPBasicAuth
+import pytz
 
 """
     Set up logger format
@@ -22,7 +23,7 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 """
-    Constants
+    Constants  
 """
 METRIC_TYPES = ["Project", "FileType", "Module", "Package", "Interface", "Class"]
 
@@ -50,7 +51,7 @@ SONAR_SERVER_SINGLE_URL = "http://localhost:9100"
 
 def param_list_to_strings(data):
     """
-    data = ['a', 'b', 'c'] -> a,b,c
+    data = ['a','b','c'] -> a,b,c
     """
     result = ""
     for d in data:
@@ -61,11 +62,11 @@ def param_list_to_strings(data):
 
 def sq_datetime_to_date(sq_datetime):
     """
-    Convert SonarQube date/time string to a native Python date
+    Convert SonarQube date/time string to a naive Python date
     params:
-        sq_datetime - SonarQube date_time (e.g. "2013-10-16T00:00:00+0300")
+        sq_datetime - SonarQube date/time (e.g. "2013-10-16T00:00:00+0300")
     output:
-        Python date objects(e.g. date(2013, 10, 16) for the example above)
+        Python date objects (e.g. date(2013,10,16), for the example above)
     """
     # return date(int(sq_datetime[:4]), int(sq_datetime[5:7]), int(sq_datetime[8:10]))
     return date.fromisoformat(sq_datetime[:10])
@@ -93,17 +94,19 @@ def sq_duration_to_minutes(sq_duration):
     # Determine minutes
     min_index = sq_duration.find("min")
     if min_index == -1:
-        return days * 480 + hours * 60 + int(sq_duration[:min_index])
-    return days * 480 + hours * 60 + int(sq_duration[:min_index])
+        return days * 480 + hours * 60
+
+    return 480 * days + 60 * hours + int(sq_duration[:min_index])
 
 
-def set_issue_lifetime(issue, project_analyses):
+def _set_issue_lifetime(issue, project_analyses):
     """
     Calculate the issue's lifetime (number of versions until fixed)
     Stored in the new issue.lifetime field (0 - if issue.resolution is not FIXED)
+
     input:
         issue - the issue itself
-        project_analyses - the list of project analyses sorted increasing by date
+        project_analyses - The list of project analyses sorted increasing by date
     output:
         issue.lifetime (new object attribute)
     NB! issue.lifetime = 0 for unresolved issues
@@ -120,6 +123,7 @@ def set_issue_lifetime(issue, project_analyses):
         if project_analyses[index].date == issue.closeDate:
             closed_index = index
             break
+
     assert -1 < created_index < closed_index < len(project_analyses)
     issue.lifetime = closed_index - created_index
 
@@ -179,7 +183,7 @@ class Issue:
         self.project = json_data["component"][:column_index]
         self.component = json_data["component"][column_index + 1 :]
 
-        # Issue resolution, key is missing if issue is not resolved
+        # Issue resolution, key is missing if issue is not yet resolved
         if "resolution" in json_data:
             # Resolutions is either FIXED or not existing
             assert json_data["resolution"] == "FIXED"
@@ -265,16 +269,14 @@ class ProjectAnalysis:
 
 def api_metrics_search(sonarServerURL):
     """
-    Retrieve the metric names from the given SonarQube instance (tested with SonaQube 7.9.1 Community Edition)
+    Retrieve the metric names from given SonarQube instance (tested with SonarQube 7.9.1 Community Edition)
     params:
         sonarServerURL - URL of SonarQube server to use
     output:
         list of retrieved metric keys
     """
     logger.debug(
-        "Contacting SonarQube server for metrics - "
-        + sonarServerURL
-        + METRIC_SEARCH_URL
+        "Contacting SonarQube server for metrics -" + sonarServerURL + METRIC_SEARCH_URL
     )
     r = requests.get(sonarServerURL + METRIC_SEARCH_URL, params={"ps": 500})
     data = r.json()
@@ -286,7 +288,7 @@ def api_metrics_search(sonarServerURL):
         # Metric key should be unique
         assert metric["key"] not in result
         result.append(metric["key"])
-    logger.debug("Metrics retrieved - " + str(result))
+    logger.debug("Metrics retrieved -  " + str(result))
     return result
 
 
@@ -307,6 +309,7 @@ def api_measures_search_history_xlsx(
     # 1. Write date info to first column
     row = 1
     for date in measures["measures"][0]["history"]:
+        # Write the date information to the first column
         outSheet.write(row, 0, date["date"][:10])
         row += 1
 
@@ -329,7 +332,7 @@ def api_measures_search_history_xlsx(
 
 
 def _sonar_qube_single_api_call(
-    path, parameters, adminUser="admin", adminPassword="admin"
+    path, parameters, adminUser="admin", adminPassword="Parola123456789!"
 ):
     """
     Generic call to SonarQube API
@@ -348,7 +351,9 @@ def _sonar_qube_single_api_call(
     return r.json()
 
 
-def _sonar_qube_api_call(path, parameters, adminUser="admin", adminPassword="admin"):
+def _sonar_qube_api_call(
+    path, parameters, adminUser="admin", adminPassword="Parola123456789!"
+):
     """
     Generic call to SonarQube API
     params:
@@ -466,12 +471,26 @@ def api_issues_search(
                 # (a) hits the HISTORY server
                 # (b) hits the SINGLE server
                 #
+                creation_date_min = datetime.combine(
+                    project_analysis.date, datetime.min.time(), tzinfo=pytz.UTC
+                )
+                sonarqube_creation_date_min = creation_date_min.strftime(
+                    "%Y-%m-%dT%H:%M:%S%z"
+                )
+
+                creation_date_max = datetime.combine(
+                    project_analysis.date, datetime.max.time(), tzinfo=pytz.UTC
+                )
+                sonarqube_creation_date_max = creation_date_max.strftime(
+                    "%Y-%m-%dT%H:%M:%S%z"
+                )
 
                 partial_result = _sonar_qube_api_call(
                     ISSUES_SEARCH,
                     {
-                        "componentKeys": project_analysis.project,
-                        "createdAt": str(project_analysis.date),
+                        "components": project_analysis.project,
+                        "createdAfter": sonarqube_creation_date_min,
+                        "createdBefore": sonarqube_creation_date_max,
                         "ps": PAGE_SIZE,
                         "p": current_page,
                         "languages": lang,
@@ -480,10 +499,19 @@ def api_issues_search(
                     },
                 )
 
-                # partial_result = _sonar_qube_single_api_call(ISSUES_SEARCH,
-                #                                       {'componentKeys': project_analysis.project, 'createdAt': str(
-                #                                           project_analysis.date), 'ps': PAGE_SIZE, 'p': current_page,
-                #                                        'languages': lang, 'resolutions': resol, 'types': types})
+                # partial_result = _sonar_qube_single_api_call(
+                #     ISSUES_SEARCH,
+                #     {
+                #         "components": project_analysis.project,
+                #         "createdAfter": sonarqube_creation_date_min,
+                #         "createdBefore": sonarqube_creation_date_max,
+                #         "ps": PAGE_SIZE,
+                #         "p": current_page,
+                #         "languages": lang,
+                #         "resolutions": resol,
+                #         "types": types,
+                #     },
+                # )
 
                 for issue in partial_result["issues"]:
                     new_issue = Issue(issue)
