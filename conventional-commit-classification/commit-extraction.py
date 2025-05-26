@@ -47,6 +47,7 @@ def compare_commits_cached(repo: Repository, base: str, head: str):
         logger.error(f"Error comparing commits {base} and {head}: {e}")
         return None
 
+
 def get_commit_date(commit) -> Optional[time.struct_time]:
     """
     Get the commit date from a commit object.
@@ -98,49 +99,126 @@ def fetch_sorted_tags(repo: Repository) -> List[Tag]:
     return sorted_tags
 
 
-def get_tag_for_commit(
-    repo: Repository, sorted_tags: List[Tag], commit_sha: str
+def build_tag_ancestry(repo: Repository, sorted_tags: List[Tag]) -> Dict[str, set]:
+    """
+    Build a dictionary mapping tag name -> set of commit SHAs reachable from that tag.
+    """
+    tag_to_commits = {}
+    for tag in tqdm(sorted_tags, desc="Fetching ancestry for tags"):
+        sha_set = set()
+        try:
+            for commit in repo.get_commits(sha=tag.commit.sha):
+                sha_set.add(commit.sha)
+        except Exception as e:
+            logger.error(f"Error getting commits for tag {tag.name}: {e}")
+        tag_to_commits[tag.name] = sha_set
+        logger.info(f"Fetched {len(sha_set)} commits for tag {tag.name}")
+    return tag_to_commits
+
+
+def get_first_tag_for_commit(
+    commit_sha: str,
+    sorted_tags: List[Tag],
+    tag_to_commits: Dict[str, set],
+    commit_date,
+    oldest_tag_date,
+    latest_tag_date,
 ) -> Optional[str]:
     """
-    For a given commit SHA, return the name of the *oldest* tag (by commit date)
-    whose commit is a descendant of (or identical to) the target commit.
-    This tells you when the commit first appeared in a release.
+    Return the name of the oldest tag whose ancestry contains the commit.
+    Optimized with tag ancestry sets.
     """
-    logger.info(f"Finding first tag for commit {commit_sha}")
-    try:
-        commit = repo.get_commit(commit_sha)
-        commit_date = get_commit_date(commit)
-        if not commit_date:
-            logger.error(f"Commit date not found for {commit_sha}")
-            return None
-        logger.info(f"Commit date for {commit_sha}: {commit_date}")
-    except Exception as e:
-        logger.error(f"Error getting commit {commit_sha}: {e}")
+    if commit_date > latest_tag_date:
+        logger.info(
+            f"Commit {commit_sha} is newer than the latest tag. Returning None."
+        )
         return None
 
-    # Iterate from oldest to newest
-    for tag in sorted_tags:
-        try:
-            comparison = compare_commits_cached(
-                repo, base=commit_sha, head=tag.commit.sha
+    if commit_date <= oldest_tag_date:
+        oldest_tag = sorted_tags[0]
+        if commit_sha in tag_to_commits[oldest_tag.name]:
+            logger.info(
+                f"Commit {commit_sha} is older than the oldest tag and contained. Assigning {oldest_tag.name}"
             )
-            if comparison.status in ["ahead", "identical"]:
-                logger.info(f"First release for {commit_sha} is tag {tag.name}")
-                return tag.name
-        except Exception as e:
-            logger.error(
-                f"Error comparing commit {commit_sha} with tag {tag.name}: {e}"
-            )
-            continue
+            return oldest_tag.name
+        # If not contained, fall through
+
+    for tag in sorted_tags:  # tags already sorted oldest to newest
+        if commit_sha in tag_to_commits[tag.name]:
+            logger.info(f"First release for {commit_sha} is tag {tag.name}")
+            return tag.name
 
     logger.info(f"No tag contains commit {commit_sha}, returning None")
     return None
 
 
-def extract_commit_data(repo: Repository, commit, tags: List[Tag]) -> Dict:
+# def get_tag_for_commit(
+#     repo: Repository, sorted_tags: List[Tag], commit_sha: str
+# ) -> Optional[str]:
+#     """
+#     For a given commit SHA, return the name of the *oldest* tag (by commit date)
+#     whose commit is a descendant of (or identical to) the target commit.
+#     This tells you when the commit first appeared in a release.
+#     """
+#     logger.info(f"Finding first tag for commit {commit_sha}")
+#     try:
+#         commit = repo.get_commit(commit_sha)
+#         commit_date = get_commit_date(commit)
+#         if not commit_date:
+#             logger.error(f"Commit date not found for {commit_sha}")
+#             return None
+#         logger.info(f"Commit date for {commit_sha}: {commit_date}")
+#     except Exception as e:
+#         logger.error(f"Error getting commit {commit_sha}: {e}")
+#         return None
+
+#     oldest_tag_date = get_commit_date(sorted_tags[0].commit)
+#     latest_tag_date = get_commit_date(sorted_tags[-1].commit)
+
+#     if commit_date > latest_tag_date:
+#         logger.info(f"Commit {commit_sha} is newer than the latest tag. Returning None.")
+#         return None
+
+#     if commit_date <= oldest_tag_date:
+#         try:
+#             comparison = compare_commits_cached(repo, commit_sha, sorted_tags[0].commit.sha)
+#             if comparison.status in ["ahead", "identical"]:
+#                 logger.info(f"Commit {commit_sha} is older than the oldest tag. Assigning oldest tag: {sorted_tags[0].name}")
+#                 return sorted_tags[0].name
+#         except Exception as e:
+#             logger.error(f"Error comparing commit {commit_sha} with oldest tag {sorted_tags[0].name}: {e}")
+#         # If not contained, fall through to ancestry loop (rare, but possible if unrelated history)
+
+#     # Iterate from oldest to newest
+#     for tag in sorted_tags:
+#         try:
+#             comparison = compare_commits_cached(
+#                 repo, base=commit_sha, head=tag.commit.sha
+#             )
+#             if comparison.status in ["ahead", "identical"]:
+#                 logger.info(f"First release for {commit_sha} is tag {tag.name}")
+#                 return tag.name
+#         except Exception as e:
+#             logger.error(
+#                 f"Error comparing commit {commit_sha} with tag {tag.name}: {e}"
+#             )
+#             continue
+
+#     logger.info(f"No tag contains commit {commit_sha}, returning None")
+#     return None
+
+
+def extract_commit_data(
+    repo: Repository,
+    commit,
+    tags: List[Tag],
+    tag_to_commits: Dict[str, set],
+    oldest_tag_date,
+    latest_tag_date,
+) -> Dict:
     """
     Extract commit data including SHA, date, message, diff, and tag.
-    Returns a dictionary with the commit data.
+    Uses precomputed ancestry sets for tag lookup.
     """
     message = commit.commit.message.strip().replace("\n", " ").replace("\r", " ")
     diff = ""  # Initialize diff as an empty string
@@ -150,8 +228,10 @@ def extract_commit_data(repo: Repository, commit, tags: List[Tag]) -> Dict:
         diff_url = comparison.diff_url
         diff_response = requests.get(diff_url)
         diff = diff_response.text.strip()
-    tag_name = get_tag_for_commit(repo, tags, commit.sha)
-
+    commit_date = get_commit_date(commit)
+    tag_name = get_first_tag_for_commit(
+        commit.sha, tags, tag_to_commits, commit_date, oldest_tag_date, latest_tag_date
+    )
     return {
         "sha": commit.sha,
         "date": commit.commit.author.date.isoformat(),
@@ -197,6 +277,13 @@ def main():
         existing_commit_count = len(commit_list)
         logger.info(f"Found {len(tags)} tags in the repository.")
 
+        # Compute oldest and latest tag dates for fast date checks
+        oldest_tag_date = get_commit_date(tags[0].commit)
+        latest_tag_date = get_commit_date(tags[-1].commit)
+
+        # Build tag ancestry sets (FAST!)
+        tag_to_commits = build_tag_ancestry(repository, tags)
+
         for commit in tqdm(
             repository.get_commits(), total=commit_count, desc="Extracting commits"
         ):
@@ -215,7 +302,14 @@ def main():
                         )
                         time.sleep(wait_time)
 
-                commit_data = extract_commit_data(repository, commit, tags)
+                commit_data = extract_commit_data(
+                    repository,
+                    commit,
+                    tags,
+                    tag_to_commits,
+                    oldest_tag_date,
+                    latest_tag_date,
+                )
                 commit_list.append(commit_data)
                 if len(commit_list) % SAVE_EVERY_N_COMMITS == 0:
                     save_commits_to_file(commit_list, output_path)
