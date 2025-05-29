@@ -7,46 +7,6 @@ from sonar_qube_api import *
     (to skip analyzing a project version delete it from the list)
 """
 PROJECTS = {
-    "FreeMind": [
-        "0.0.3",
-        "0.1.0",
-        "0.2.0",
-        "0.3.1",
-        "0.4.0",
-        "0.5.0",
-        "0.6.0",
-        "0.6.1",
-        "0.6.5",
-        "0.6.7",
-        "0.7.1",
-        "0.8.0",
-        "0.8.1",
-        "0.9.0Beta17",
-        "0.9.0Beta20",
-        "0.9.0RC1",
-        "0.9.0RC3",
-        "0.9.0RC6",
-        "0.9.0RC8",
-        "0.9.0RC10",
-        "0.9.0RC14",
-        "0.9.0",
-        "1.0.0Alpha4",
-        "1.0.0Alpha6",
-        "1.0.0Alpha8",
-        "1.0.0Beta2",
-        "1.0.0Beta5",
-        "1.0.0Beta7",
-        "1.0.0Beta9",
-        "1.0.0RC1",
-        "1.0.0RC3",
-        "1.0.0RC4",
-        "1.0.0RC5",
-        "1.0.0",
-        "1.0.1RC1",
-        "1.0.1",
-        "1.1.0Beta1",
-        "1.1.0Beta2",
-    ],
     "jEdit": [
         "2.3pre2",
         "2.3pre4",
@@ -94,37 +54,8 @@ PROJECTS = {
         "5.4.0",
         "5.5.0",
         "5.6.0",
-    ],
-    "TuxGuitar": [
-        "0.1pre",
-        "0.2",
-        "0.3",
-        "0.3.1",
-        "0.4",
-        "0.4.1",
-        "0.5",
-        "0.6",
-        "0.7",
-        "0.8",
-        "0.9",
-        "0.9.1",
-        "1.0.rc1",
-        "1.0.rc2",
-        "1.0.rc3",
-        "1.0.rc4",
-        "1.0",
-        "1.1",
-        "1.2",
-        "1.3.0",
-        "1.3.1",
-        "1.3.2",
-        "1.4",
-        "1.5",
-        "1.5.1",
-        "1.5.2",
-        "1.5.3",
-        "1.5.4",
-    ],
+        "5.7.0"
+    ]
 }
 
 """
@@ -318,30 +249,20 @@ def calculate_package_technical_debt_history():
                 )
 
                 if "component" in component_measure:
-                    assert (
-                        len(component_measure["component"]["measures"]) == 2
-                    ), "Returns sqale_index, ncloc"
+                    measures = component_measure["component"].get("measures", [])
+                    # build a lookup of metric → its integer value
+                    m = {mt["metric"]: int(mt["value"]) for mt in measures if "value" in mt}
 
-                    v0 = component_measure["component"]["measures"][0]
-                    v1 = component_measure["component"]["measures"][1]
+                    # SKIP this file if there's no ncloc reported
+                    if "ncloc" not in m:
+                        continue
 
-                    # Sanity checks
-                    assert v0["metric"] in [
-                        "ncloc",
-                        "sqale_index",
-                    ], "Must be one of these measurements"
-                    assert v1["metric"] in [
-                        "ncloc",
-                        "sqale_index",
-                    ], "Must be one of these measurements"
-                    assert v0["metric"] != v1["metric"]
-
-                    if v0["metric"] == "ncloc":
-                        ncloc = int(v0["value"])
-                        tech_debt = int(v1["value"])
-                    else:
-                        ncloc = int(v1["value"])
-                        tech_debt = int(v0["value"])
+                    # safely extract both values
+                    ncloc     = m["ncloc"]
+                    tech_debt = m.get("sqale_index", 0)
+                else:
+                    # no component data at all, skip
+                    continue
 
                 if tech_debt == "n/a":
                     continue
@@ -825,4 +746,4 @@ if __name__ == "__main__":
     """
     Calculate technical debt at package level and correlate it with package LOC
     """
-    # calculate_package_technical_debt_history()
+    calculate_package_technical_debt_history()

@@ -186,7 +186,7 @@ class Issue:
         # Issue resolution, key is missing if issue is not yet resolved
         if "resolution" in json_data:
             # Resolutions is either FIXED or not existing
-            assert json_data["resolution"] == "FIXED"
+            assert json_data["resolution"] == "FIXED" or json_data["resolution"] == "REMOVED"
         self.resolution = (
             Resolution.FIXED
             if ("resolution" in json_data) and (json_data["resolution"] == "FIXED")
