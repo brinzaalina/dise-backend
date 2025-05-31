@@ -1,4 +1,5 @@
 from datetime import date
+import json
 
 from sonar_qube_api import *
 
@@ -54,9 +55,40 @@ PROJECTS = {
         "5.4.0",
         "5.5.0",
         "5.6.0",
-        "5.7.0"
+        "5.7.0",
     ]
 }
+
+SQ_METRICS = [
+    "ncloc",
+    "sqale_index",
+    "sqale_debt_ratio",
+    "code_smells",
+    "complexity",
+    "cognitive_complexity",
+    "duplicated_lines_density",
+    "bugs",
+    "vulnerabilities",
+    "coverage",
+    "comment_lines_density",
+]
+
+COUNT_METRICS = [
+    "ncloc",
+    "sqale_index",
+    "code_smells",
+    "complexity",
+    "cognitive_complexity",
+    "bugs",
+    "vulnerabilities",
+]
+
+DENSITY_METRICS = [
+    "sqale_debt_ratio",
+    "duplicated_lines_density",
+    "coverage",
+    "comment_lines_density",
+]
 
 """
     Utility functions
@@ -251,14 +283,18 @@ def calculate_package_technical_debt_history():
                 if "component" in component_measure:
                     measures = component_measure["component"].get("measures", [])
                     # build a lookup of metric → its integer value
-                    m = {mt["metric"]: int(mt["value"]) for mt in measures if "value" in mt}
+                    m = {
+                        mt["metric"]: int(mt["value"])
+                        for mt in measures
+                        if "value" in mt
+                    }
 
                     # SKIP this file if there's no ncloc reported
                     if "ncloc" not in m:
                         continue
 
                     # safely extract both values
-                    ncloc     = m["ncloc"]
+                    ncloc = m["ncloc"]
                     tech_debt = m.get("sqale_index", 0)
                 else:
                     # no component data at all, skip
@@ -732,6 +768,71 @@ def export_detailed_td_characterization_by_software_version_xlsx():
         work_book.close()
 
 
+def extract_release_quality_metrics(app):
+    """
+    For the given application, go through all its versions, query SonarQube to extract the SQ_METRICS per file, and sum per-release totals.
+    Returns a dictionary of <version, {<metric>: <value>}> pairs.
+    """
+    release_metrics = {}
+    for version in PROJECTS[app]:
+        logger.info(f"Extracting release metrics for {app} version {version}")
+        agg = {m: 0.0 for m in COUNT_METRICS}
+        weighted_agg = {m: 0.0 for m in DENSITY_METRICS}
+        total_ncloc = 0.0
+        total_files = 0
+        processed_files = 0
+        skipped_no_ncloc = 0
+        fil_names = api_cu_names(f"{app}.{version}")
+        logger.info(f"  Found {len(fil_names)} components to analyze")
+        for fil_name in fil_names:
+            total_files += 1
+            comp = api_measures_component(fil_name, SQ_METRICS)
+            measures = comp.get("component", {}).get("measures", [])
+            m = {d["metric"]: float(d["value"]) for d in measures if "value" in d}
+
+            if "ncloc" not in m:
+                skipped_no_ncloc += 1
+                logger.debug(f"    Skipping {fil_name}: no ncloc")
+                continue
+            processed_files += 1
+            ncloc_f = m["ncloc"]
+            total_ncloc += ncloc_f
+
+            for metric in COUNT_METRICS:
+                agg[metric] += m.get(metric, 0.0)
+            for metric in DENSITY_METRICS:
+                weighted_agg[metric] += m.get(metric, 0.0) * ncloc_f
+
+        if total_files > 0:
+            logger.info(f"  Version {version}: processed {processed_files}/{total_files} files, skipped {skipped_no_ncloc} without ncloc")
+
+        totals = {}
+        for metric in COUNT_METRICS:
+            totals[metric] = agg[metric]
+        for metric in DENSITY_METRICS:
+            if total_ncloc > 0:
+                totals[metric] = weighted_agg[metric] / total_ncloc
+            else:
+                totals[metric] = 0.0
+        release_metrics[version] = totals
+        logger.debug(f"Release {version} metrics: {totals}")
+    logger.info(f"Completed extraction for project: {app}")
+    return release_metrics
+
+
+def export_release_quality_metrics(app, output_file="release_quality_metrics.json"):
+    """
+    Export the release quality metrics for the given application to a JSON file.
+    """
+    results = extract_release_quality_metrics(app)
+    try:
+        with open(output_file, "w") as f:
+            json.dump(results, f, indent=4)
+        logger.info(f"Release quality metrics exported to {output_file}")
+    except Exception as e:
+        logger.error(f"Failed to export release quality metrics: {e}")
+
+
 if __name__ == "__main__":
     """
     Calculate technical debt ratios by application version and export to 'technical_debt_by_software_version.xlxs'
@@ -746,4 +847,9 @@ if __name__ == "__main__":
     """
     Calculate technical debt at package level and correlate it with package LOC
     """
-    calculate_package_technical_debt_history()
+    # calculate_package_technical_debt_history()
+
+    """
+    Calculate release quality metrics for each application version and export to JSON
+    """
+    export_release_quality_metrics(app="jEdit", output_file="jedit_release_quality_metrics.json")
