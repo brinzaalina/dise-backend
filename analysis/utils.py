@@ -118,7 +118,9 @@ def preprocess_commits(df: pd.DataFrame) -> pd.DataFrame:
     if "version" not in df.columns:
         logger.error("DataFrame must contain 'version' column.")
         raise DataLoadError("DataFrame must contain 'version' column.")
-    
+
     df_filtered = df[df["version"].notnull()].copy()
-    logger.info(f"Filtered DataFrame to {len(df_filtered)} rows with non-null versions.")
+    logger.info(
+        f"Filtered DataFrame to {len(df_filtered)} rows with non-null versions."
+    )
     return df_filtered
