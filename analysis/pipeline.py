@@ -6,9 +6,10 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from .utils import DataLoadError
+import matplotlib
 
 logger = logging.getLogger(__name__)
-
+matplotlib.use("Agg")  # Use non-interactive backend for saving plots
 
 def compute_commit_statistics(commit_df: pd.DataFrame) -> (pd.DataFrame, pd.DataFrame):
     """
@@ -50,8 +51,13 @@ def prepare_features(
             "No common versions found between metrics and commits after normalization"
         )
 
-    def version_key(v):
-        parts = [int(p) if p.isdigit() else p for p in v.split(".")]
+    def version_key(v: str):
+        parts = []
+        for p in v.split('.'):
+            if p.isdigit():
+                parts.append((0, int(p)))
+            else:
+                parts.append((1, p))
         return parts
 
     common_sorted = sorted(common_versions, key=version_key)
@@ -243,4 +249,16 @@ def write_analysis_results(
         'correlations': correlations,
         'pca_projection': pca_projection
     }
-    return result
+
+    def sanitize(obj):
+        if isinstance(obj, dict):
+            return {k: sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [sanitize(v) for v in obj]
+        elif isinstance(obj, float) and pd.isna(obj):
+            return None
+        else:
+            return obj
+
+    sanitized_result = sanitize(result)
+    return sanitized_result

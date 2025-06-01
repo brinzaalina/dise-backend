@@ -5,11 +5,13 @@ from flask import Flask, request, jsonify, send_file
 from analysis.utils import load_commits_from_json_list, load_release_metrics_from_json, preprocess_commits, DataLoadError
 from analysis.pipeline import write_analysis_results
 from datetime import datetime
+from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 app.config['UPLOAD_FOLDER'] = 'uploads'
 Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB
