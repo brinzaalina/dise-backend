@@ -223,6 +223,7 @@ def write_analysis_results(
     ax.set_ylabel('PCA Component 2')
     ax.grid(True)
     plt.tight_layout()
+    ax.legend(*scatter.legend_elements(), title="Cluster")
     fig.savefig(png_path)
     plt.close(fig)
     logger.info(f"Saved PCA scatter plot to PNG: {png_path}")
