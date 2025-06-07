@@ -152,62 +152,6 @@ def get_first_tag_for_commit(
     return None
 
 
-# def get_tag_for_commit(
-#     repo: Repository, sorted_tags: List[Tag], commit_sha: str
-# ) -> Optional[str]:
-#     """
-#     For a given commit SHA, return the name of the *oldest* tag (by commit date)
-#     whose commit is a descendant of (or identical to) the target commit.
-#     This tells you when the commit first appeared in a release.
-#     """
-#     logger.info(f"Finding first tag for commit {commit_sha}")
-#     try:
-#         commit = repo.get_commit(commit_sha)
-#         commit_date = get_commit_date(commit)
-#         if not commit_date:
-#             logger.error(f"Commit date not found for {commit_sha}")
-#             return None
-#         logger.info(f"Commit date for {commit_sha}: {commit_date}")
-#     except Exception as e:
-#         logger.error(f"Error getting commit {commit_sha}: {e}")
-#         return None
-
-#     oldest_tag_date = get_commit_date(sorted_tags[0].commit)
-#     latest_tag_date = get_commit_date(sorted_tags[-1].commit)
-
-#     if commit_date > latest_tag_date:
-#         logger.info(f"Commit {commit_sha} is newer than the latest tag. Returning None.")
-#         return None
-
-#     if commit_date <= oldest_tag_date:
-#         try:
-#             comparison = compare_commits_cached(repo, commit_sha, sorted_tags[0].commit.sha)
-#             if comparison.status in ["ahead", "identical"]:
-#                 logger.info(f"Commit {commit_sha} is older than the oldest tag. Assigning oldest tag: {sorted_tags[0].name}")
-#                 return sorted_tags[0].name
-#         except Exception as e:
-#             logger.error(f"Error comparing commit {commit_sha} with oldest tag {sorted_tags[0].name}: {e}")
-#         # If not contained, fall through to ancestry loop (rare, but possible if unrelated history)
-
-#     # Iterate from oldest to newest
-#     for tag in sorted_tags:
-#         try:
-#             comparison = compare_commits_cached(
-#                 repo, base=commit_sha, head=tag.commit.sha
-#             )
-#             if comparison.status in ["ahead", "identical"]:
-#                 logger.info(f"First release for {commit_sha} is tag {tag.name}")
-#                 return tag.name
-#         except Exception as e:
-#             logger.error(
-#                 f"Error comparing commit {commit_sha} with tag {tag.name}: {e}"
-#             )
-#             continue
-
-#     logger.info(f"No tag contains commit {commit_sha}, returning None")
-#     return None
-
-
 def extract_commit_data(
     repo: Repository,
     commit,
